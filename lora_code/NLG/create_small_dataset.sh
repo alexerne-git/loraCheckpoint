@@ -20,7 +20,7 @@ create_smaller_file $path/train.txt $small_path/reduced_train.txt 500
 echo "Extracting first 200 lines from valid.txt..."
 create_smaller_file $path/valid.txt $small_path/reduced_valid.txt 100
 echo "Extracting first 20 lines from test.txt..."
-create_smaller_file $path/test.txt $small_path/reduced_test.txt 50
+create_smaller_file $path/test.txt $small_path/reduced_test.txt 10
 
 # Format and encode the smaller datasets
 echo "Formatting and encoding datasets..."
