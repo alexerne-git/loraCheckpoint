@@ -61,110 +61,102 @@ def post_process(sent, is_tokenize, is_lower):
 
     return sent
 
+
 if __name__ == "__main__":
     enc = encoder.get_encoder(args.vocab)
 
     ref_unique = None
 
-    # Load reference unique IDs if provided
     if args.ref_unique_file is not None:
-        print('Reading ref_unique_file...')
+        print('reading ref_unique_file.')
         ref_unique = []
-        uniques = set()
+        uniques = {}
         with open(args.ref_unique_file, 'r') as ref_unique_reader:
             for line in ref_unique_reader:
                 _id = int(line.strip())
                 ref_unique.append(_id)
-                uniques.add(_id)
-        print(f'Total unique IDs: {len(uniques)}')
+                uniques[_id] = 1
+        print('len refer dict', len(ref_unique), 'unique', len(uniques))
 
-    # Open necessary files
     with open(args.sample_file, 'r') as sample_reader, \
-         open(args.input_file, 'r', encoding='utf8') as input_reader, \
-         open(args.output_pred_file, 'w', encoding='utf8') as pred_writer:
+             open(args.input_file, 'r', encoding='utf8') as input_reader, \
+             open(args.output_pred_file, 'w', encoding='utf8') as pred_writer:
 
         refer_dict = {}
         context_list = []
         line_id = 0
-
-        # Process input file to build references
         for line in input_reader:
             items = json.loads(line.strip())
             context = items['context']
             completion = items['completion']
+
             context_list.append(context)
 
-            keep = (args.filter == 'all' or
-                    (args.filter == 'seen' and items.get('cate', False)) or
-                    (args.filter == 'unseen' and not items.get('cate', False)))
+            keep = False
 
-            # Use line_id or ref_unique for keys
+            if args.filter == 'all':
+                keep = True
+            if args.filter == 'seen' and items['cate']: 
+                keep = True
+            if args.filter == 'unseen' and not items['cate']:
+                keep = True
+
             if ref_unique is None:
-                _key = line_id
+                _key = context
             else:
-                if line_id < len(ref_unique):
-                    _key = ref_unique[line_id]
-                else:
-                    print(f"Warning: line_id {line_id} exceeds ref_unique length.")
-                    line_id += 1
-                    continue
+                _key = ref_unique[line_id]
 
             if keep:
-                if _key not in refer_dict:
-                    refer_dict[_key] = {'references': []}
-                refer_dict[_key]['references'].append(
-                    completion.split('<|endoftext|>')[0].split('\n\n')[0].strip()
-                )
+                if not _key in refer_dict:
+                    refer_dict[_key] = {}
+                    refer_dict[_key]['references'] = []
+                refer_dict[_key]['references'].append(completion.split('<|endoftext|>')[0].split('\n\n')[0].strip())
 
             line_id += 1
 
-        print(f'Total unique references: {len(refer_dict)}')
+        print('unique refer dict', len(refer_dict))
 
-        # Process sample file for predictions
         for line in sample_reader:
             items = json.loads(line.strip())
             _id = items['id']
             _pred_tokens = items['predict']
 
-            # Use ref_unique or context_list for keys
-            if ref_unique is not None and _id < len(ref_unique):
+            if ref_unique is None:
+                _key = context_list[_id]
+            else:
                 _key = ref_unique[_id]
-            elif ref_unique is None and _id < len(context_list):
-                _key = _id
-            else:
-                print(f"Warning: Invalid index for ref_unique or context_list (id: {_id}).")
-                continue
 
+            #assert _key in refer_dict
             if _key in refer_dict:
-                refer_dict[_key]['sample'] = enc.decode(_pred_tokens).split('<|endoftext|>')[0].split('\n\n')[0].strip()
-            else:
-                print(f"Warning: Key {_key} not found in refer_dict.")
+                refer_dict[_key]['sample'] = enc.decode(_pred_tokens).split('<|endoftext|>')[0].split('\n\n')[0].strip() 
 
-        # Prepare references and predictions for output
-        references = [refer_dict[key]['references'] for key in refer_dict if 'references' in refer_dict[key]]
-        hypothesis = [refer_dict[key].get('sample', '') for key in refer_dict]
+        references = [refer_dict[s]['references'] for s in refer_dict]
+        hypothesis = [refer_dict[s]['sample'] for s in refer_dict]
 
-        # Write references and predictions to output files
         if args.ref_type == 'e2e':
             with open(args.output_ref_file, 'w', encoding='utf8') as ref_writer:
                 for ref, hyp in zip(references, hypothesis):
                     for r in ref:
                         ref_writer.write(post_process(r, args.tokenize, args.lower) + '\n')
-                    ref_writer.write('\n')  # Blank line between groups
+                    ref_writer.write('\n')
                     pred_writer.write(post_process(hyp, args.tokenize, args.lower) + '\n')
 
         elif args.ref_type in ['webnlg', 'dart']:
-            os.makedirs(args.output_ref_file, exist_ok=True)
+            if not os.path.exists(args.output_ref_file):
+                os.makedirs(args.output_ref_file)
+
             reference_writers = [
-                open(os.path.join(args.output_ref_file, f'reference{fid}'), 'w', encoding='utf8')
-                for fid in range(args.ref_num)
-            ]
+                open(os.path.join(args.output_ref_file, f'reference{fid}'), 'w', encoding='utf8') 
+                for fid in range(0, args.ref_num)
+            ] 
+            
             for ref, hyp in zip(references, hypothesis):
-                for fid in range(args.ref_num):
+                for fid in range(0, args.ref_num):
                     if len(ref) > fid:
                         reference_writers[fid].write(post_process(ref[fid], args.tokenize, args.lower) + '\n')
                     else:
                         reference_writers[fid].write(post_process(ref[0], args.tokenize, args.lower) + '\n')
                 pred_writer.write(post_process(hyp, args.tokenize, args.lower) + '\n')
+                    
             for writer in reference_writers:
                 writer.close()
